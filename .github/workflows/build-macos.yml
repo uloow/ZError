@@ -35,7 +35,7 @@ jobs:
         run: |
           set -euo pipefail
           upstream_sha=$(gh api "repos/$UPSTREAM_OWNER/$UPSTREAM_REPO/commits/$UPSTREAM_BRANCH" --jq .sha)
-          last_sha=$(gh release view --json body --jq .body 2>/dev/null \
+          last_sha=$(gh release view -R "$GITHUB_REPOSITORY" --json body --jq .body 2>/dev/null \
             | sed -n 's/.*upstream-sha: \([0-9a-f]\{40\}\).*/\1/p' | head -1 || true)
 
           echo "上游最新提交: $upstream_sha"
@@ -81,7 +81,7 @@ jobs:
             fi
           done
           if [ "$failed" = "1" ]; then
-            gh issue create \
+            gh issue create -R "$GITHUB_REPOSITORY" \
               --title "补丁冲突：$failed_name 无法应用（上游 $(date +%Y-%m-%d) 更新）" \
               --body "上游 \`$UPSTREAM_BRANCH\` 更新到 \`${{ steps.check.outputs.upstream_sha }}\` 后，补丁 \`$failed_name\` 无法自动应用。
 
@@ -186,11 +186,11 @@ jobs:
           TAG="v${VERSION}-macos"
 
           # 同一版本重复构建时避免 tag 冲突
-          if gh release view "$TAG" >/dev/null 2>&1; then
+          if gh release view "$TAG" -R "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
             TAG="${TAG}-b${GITHUB_RUN_NUMBER}"
           fi
 
-          gh release create "$TAG" "${{ steps.pkg.outputs.dmg }}" \
+          gh release create "$TAG" "${{ steps.pkg.outputs.dmg }}" -R "$GITHUB_REPOSITORY" \
             --title "ZError ${VERSION} macOS" \
             --notes-file /tmp/release-notes.md
           echo "已发布：$TAG"
@@ -207,7 +207,7 @@ jobs:
       - name: 构建失败自动开 issue
         if: failure() && steps.patch.outcome != 'failure'
         run: |
-          gh issue create \
+          gh issue create -R "$GITHUB_REPOSITORY" \
             --title "自动构建失败（$(date +%Y-%m-%d)）" \
             --body "上游 \`$UPSTREAM_BRANCH\` @ \`${{ steps.check.outputs.upstream_sha }}\` 的自动构建失败了。
 
