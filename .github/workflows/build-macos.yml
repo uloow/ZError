@@ -185,15 +185,19 @@ jobs:
           VERSION="${{ steps.pkg.outputs.version }}"
           TAG="v${VERSION}-macos"
 
-          # 同一版本重复构建时避免 tag 冲突
+          # 同一版本上游有多次提交时，滚动更新同一个 release，不堆积重复 tag
           if gh release view "$TAG" -R "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-            TAG="${TAG}-b${GITHUB_RUN_NUMBER}"
+            gh release upload "$TAG" "${{ steps.pkg.outputs.dmg }}" -R "$GITHUB_REPOSITORY" --clobber
+            gh release edit "$TAG" -R "$GITHUB_REPOSITORY" \
+              --title "ZError ${VERSION} macOS" \
+              --notes-file /tmp/release-notes.md
+            echo "已更新：$TAG"
+          else
+            gh release create "$TAG" "${{ steps.pkg.outputs.dmg }}" -R "$GITHUB_REPOSITORY" \
+              --title "ZError ${VERSION} macOS" \
+              --notes-file /tmp/release-notes.md
+            echo "已发布：$TAG"
           fi
-
-          gh release create "$TAG" "${{ steps.pkg.outputs.dmg }}" -R "$GITHUB_REPOSITORY" \
-            --title "ZError ${VERSION} macOS" \
-            --notes-file /tmp/release-notes.md
-          echo "已发布：$TAG"
 
       - name: 上传构建产物（保留 30 天）
         if: steps.check.outputs.skip == 'false'
