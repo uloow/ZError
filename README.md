@@ -26,7 +26,7 @@ patches/*.patch                     # 6 个 macOS 修复补丁
 3. 有更新 → 检出上游源码 → 按顺序打 `patches/*.patch`
 4. `npm ci` → `tauri build` → `hdiutil` 封 DMG
 5. 版本号直接取 `src-tauri/tauri.conf.json` 里的值（**跟随上游，不自造版本号**）
-6. 发 Release，tag 为 `v{版本号}-macos`
+6. 发 Release，tag 为 `v{版本号}-macos`；上游同一版本有多次提交时**滚动覆盖同一个 release**，不会堆一堆重复 tag
 
 **补丁打不上时不会出坏包**：流水线会失败并自动开一个 issue 提醒，需要人工把补丁 rebase 到新上游代码上。
 
