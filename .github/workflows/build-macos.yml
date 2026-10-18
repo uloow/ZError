@@ -128,7 +128,11 @@ jobs:
         run: |
           set -euo pipefail
           # 只出 .app：Tauri 自带的 dmg 打包要驱动 Finder，CI 里会失败，下面用 hdiutil 手工封
-          ./node_modules/.bin/tauri build -b app
+          # createUpdaterArtifacts 用 --config 覆盖为 false：上游配了更新公钥但我们没有私钥，
+          # 不改的话打包阶段会直接报 "A public key has been found, but no private key" 失败。
+          # 用命令行覆盖而不是改补丁，这样上游改这个字段也不会导致补丁冲突。
+          ./node_modules/.bin/tauri build -b app \
+            --config '{"bundle":{"createUpdaterArtifacts":false}}'
 
       - name: 读取版本号并封 DMG
         id: pkg
