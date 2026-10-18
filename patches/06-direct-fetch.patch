@@ -1,0 +1,248 @@
+diff --git a/src/services/app/iconCache.ts b/src/services/app/iconCache.ts
+index 75d8b57..dc9be1c 100644
+--- a/src/services/app/iconCache.ts
++++ b/src/services/app/iconCache.ts
+@@ -2,6 +2,8 @@ const REMOTE_ICON_CACHE_PREFIX = 'remote_icon_cache_v1:'
+ const REMOTE_ICON_CACHE_TTL = 7 * 24 * 60 * 60 * 1000
+ const PROD_PLATFORM_ICON_BASE_URL = 'https://webapi.zaizhexue.top/providers/'
+ const DEV_PLATFORM_ICON_BASE_URL = 'https://webapi.zaizhexue.top/providers/'
++// webapi.zaizhexue.top 走系统代理会被 EdgeOne 拦成 567，必须直连（见 utils/directFetch.ts）
++import { DIRECT_PROXY } from '../../utils/directFetch'
+ 
+ const memoryIconCache = new Map<string, string>()
+ const pendingIconRequests = new Map<string, Promise<string>>()
+@@ -100,7 +102,7 @@ const fetchIconResponse = async (url: string): Promise<Response> => {
+   if (isTauri) {
+     try {
+       const { fetch: tauriFetch } = await import('@tauri-apps/plugin-http')
+-      return await tauriFetch(url, { method: 'GET' }) as Response
++      return await tauriFetch(url, { method: 'GET', proxy: DIRECT_PROXY } as any) as Response
+     } catch (error) {
+       console.warn('使用 Tauri HTTP 获取远程平台图标失败，回退到浏览器 fetch:', error)
+     }
+diff --git a/src/services/app/remoteHttp.ts b/src/services/app/remoteHttp.ts
+index 95b7228..b76905a 100644
+--- a/src/services/app/remoteHttp.ts
++++ b/src/services/app/remoteHttp.ts
+@@ -2,6 +2,9 @@ export const AUTH_API_BASE = 'https://app.zaizhexue.top'
+ export const CAMPUS_API_BASE = 'https://campuses.zerror.cc'
+ export const AUTH_TOKEN_KEY = 'zerror-auth-token'
+ 
++// 国内远程 API 直连：绕过系统代理，防止被代理节点拖死/拦截（见 utils/directFetch.ts）
++import { DIRECT_PROXY } from '../../utils/directFetch'
++
+ let memoryAuthToken = ''
+ 
+ export class RemoteApiError extends Error {
+@@ -81,6 +84,7 @@ export async function remoteFetch(url: string, init: RequestInit = {}, withAuth
+   return fetch(url, {
+     ...init,
+     headers: mergeHeaders(init, withAuth),
++    proxy: DIRECT_PROXY,
+   } as any)
+ }
+ 
+@@ -116,7 +120,7 @@ export async function remoteUpload(url: string, file: File, field = 'image') {
+   const token = readStoredAuthToken()
+   if (token) headers.Authorization = `Bearer ${token}`
+ 
+-  const res = await fetch(url, { method: 'POST', headers, body } as any)
++  const res = await fetch(url, { method: 'POST', headers, body, proxy: DIRECT_PROXY } as any)
+   const data = await readJson(res)
+   if (!res.ok) {
+     throw new RemoteApiError(res.status, messageFrom(data, res.statusText || '上传失败'), data)
+diff --git a/src/services/app/versionCheck.ts b/src/services/app/versionCheck.ts
+index cccada1..6b0eb8a 100644
+--- a/src/services/app/versionCheck.ts
++++ b/src/services/app/versionCheck.ts
+@@ -4,6 +4,7 @@
+  */
+ 
+ import { environmentDetector } from './environmentDetector';
++import { DIRECT_PROXY } from '../../utils/directFetch';
+ 
+ export interface VersionInfo {
+   version: string;
+@@ -43,7 +44,8 @@ export class VersionCheckService {
+ 
+         if (environmentDetector.isTauriEnvironment()) {
+           const { fetch: tauriFetch } = await import('@tauri-apps/plugin-http');
+-          response = await tauriFetch(url);
++          // webapi.zaizhexue.top 走系统代理会被 EdgeOne 拦成 567，必须直连
++          response = await tauriFetch(url, { proxy: DIRECT_PROXY } as any);
+         } else {
+           response = await fetch(url);
+         }
+diff --git a/src/services/model/config.ts b/src/services/model/config.ts
+index 3681374..f495c6e 100644
+--- a/src/services/model/config.ts
++++ b/src/services/model/config.ts
+@@ -1,5 +1,6 @@
+ import { reactive, watch, computed } from 'vue'
+ import { normalizeApiProtocol } from './protocol'
++import { DIRECT_PROXY } from '../../utils/directFetch'
+ 
+ // AI 平台配置接口
+ export type ApiProtocol = 'openai-chat' | 'openai-response' | 'anthropic' | 'custom'
+@@ -374,7 +375,8 @@ let pendingRemoteModelsCatalogRequest: Promise<RemoteModelsCatalog> | null = nul
+ const fetchRemoteModelsCatalogFromUrl = async (url: string): Promise<RemoteModelsCatalog> => {
+   try {
+     const { fetch: tauriFetch } = await import('@tauri-apps/plugin-http')
+-    const r = await tauriFetch(url, { method: 'GET' })
++    // 模型目录走国内 CDN，直连更稳（见 utils/directFetch.ts）
++    const r = await tauriFetch(url, { method: 'GET', proxy: DIRECT_PROXY } as any)
+     if (!r.ok) throw new Error(`HTTP ${r.status}`)
+     return normalizeRemoteModelsCatalog(await r.json())
+   } catch (tauriError) {
+diff --git a/src/services/model/runner.ts b/src/services/model/runner.ts
+index 0dc004a..aa46c67 100644
+--- a/src/services/model/runner.ts
++++ b/src/services/model/runner.ts
+@@ -2,6 +2,7 @@ import { resolveExecutableModelJsCode, resolveRuntimeModelId } from './protocol'
+ import { modelConfigManager, modelHasVision } from './config'
+ import { settingsManager } from '../app/settings'
+ import { logAgentDebug } from '../agent/debugLog'
++import { DIRECT_PROXY } from '../../utils/directFetch'
+ 
+ export interface ModelToolCall {
+   id: string
+@@ -385,6 +386,8 @@ export async function runTextModel(
+           connectTimeout: typeof (init as { connectTimeout?: number }).connectTimeout === 'number'
+             ? (init as { connectTimeout?: number }).connectTimeout
+             : 30_000,
++          // 模型 API 直连：绕过系统代理，防止流式请求被代理拖死（见 utils/directFetch.ts）
++          proxy: DIRECT_PROXY,
+           credentials: init.credentials ?? 'include',
+           signal: init.signal ?? abortController.signal,
+         } as any)
+diff --git a/src/services/questionServer/invoke.ts b/src/services/questionServer/invoke.ts
+index 80a47a4..dddd69a 100644
+--- a/src/services/questionServer/invoke.ts
++++ b/src/services/questionServer/invoke.ts
+@@ -1,6 +1,7 @@
+ import type { AIModel } from '../model/config'
+ import { resolveExecutableModelJsCode, resolveRuntimeModelId } from '../model/protocol'
+ import { buildAnswerChatMessages } from '../../utils/answer/answerFewShot'
++import { DIRECT_PROXY } from '../../utils/directFetch'
+ import { modelApi, settingsApi } from './deps'
+ import {
+   createCancelledRequestError,
+@@ -197,11 +198,13 @@ export const callModelWithStreaming = async (
+   const { invoke } = await import('@tauri-apps/api/core')
+   const tauriFetch = async (input: RequestInfo | URL, init: RequestInit = {}) => {
+     try {
+-      return await tauriHttp.fetch(input as any, {
+-        ...init,
+-        credentials: init.credentials ?? 'include',
+-        signal: init.signal ?? abortController.signal
+-      } as any)
++        return await tauriHttp.fetch(input as any, {
++          ...init,
++          // 模型 API 直连：系统代理会把 deepseek/百炼的流式请求拖到超时
++          proxy: DIRECT_PROXY,
++          credentials: init.credentials ?? 'include',
++          signal: init.signal ?? abortController.signal
++        } as any)
+     } catch (error) {
+       if (isAbortLikeError(error)) throw error
+       throw new Error(formatModelCallError(error, '网络请求失败'))
+diff --git a/src/services/questionServer/urlQuestion.ts b/src/services/questionServer/urlQuestion.ts
+index 5259444..31316f4 100644
+--- a/src/services/questionServer/urlQuestion.ts
++++ b/src/services/questionServer/urlQuestion.ts
+@@ -1,5 +1,6 @@
+ import { ref } from 'vue'
+ import { resolveExecutableModelJsCode, resolveRuntimeModelId } from '../model/protocol'
++import { DIRECT_PROXY } from '../../utils/directFetch'
+ import {
+   buildUrlOptionMapForMode,
+   buildUrlQuestionPromptParts,
+@@ -458,6 +459,8 @@ export const analyzeUrlQuestion = async (requestId: string) => {
+     const tauriFetch: typeof fetch = ((input: RequestInfo | URL, init: RequestInit = {}) =>
+       tauriHttp.fetch(input as any, {
+         ...init,
++        // 视觉模型 API 直连：绕过系统代理，防止流式请求被代理拖死（见 utils/directFetch.ts）
++        proxy: DIRECT_PROXY,
+         credentials: init.credentials ?? 'include',
+         signal: init.signal ?? abortController.signal
+       } as any)) as typeof fetch
+diff --git a/src/utils/directFetch.ts b/src/utils/directFetch.ts
+new file mode 100644
+index 0000000..715aa53
+--- /dev/null
++++ b/src/utils/directFetch.ts
+@@ -0,0 +1,27 @@
++/**
++ * 强制直连的 Tauri HTTP 请求选项。
++ *
++ * 背景：tauri-plugin-http 的 fetch 底层是 reqwest，默认会自动探测
++ * macOS 系统代理（Clash / Surge 等）。系统代理开着时：
++ *   - 国内 API（deepseek / 阿里百炼）偶尔被代理节点拖死，
++ *     表现为「Model call failed: Timeout waiting for model response (no new tokens)」；
++ *   - webapi.zaizhexue.top（EdgeOne CDN）直接返回 567 拦截页；
++ *   - 超星图片 CDN 被拦。
++ *
++ * 原理：reqwest 的 `ClientBuilder::proxy()` 一旦被显式调用就会关闭
++ * 自动系统代理探测（auto_sys_proxy = false，见 reqwest src/async_impl/client.rs），
++ * 再配合 `noProxy: "*"`（文档明确「`*` matches all hostnames」）对所有主机绕过代理，
++ * 等效于直连。占位 URL `http://127.0.0.1:9` 只是凑数，永远不会真正被使用。
++ *
++ * 使用范围：国内直连目标（模型 API、zaizhexue webapi、超星图片）。
++ * GitHub 等需要走代理的境外下载（updateDownload.ts）不要加这个参数。
++ */
++export const DIRECT_PROXY = {
++  all: { url: 'http://127.0.0.1:9', noProxy: '*' }
++} as const
++
++/** 带直连参数的 plugin-http fetch，签名与原 fetch 一致，直接替换调用点即可 */
++export const directFetch = async (input: RequestInfo | URL, init: RequestInit = {}): Promise<Response> => {
++  const tauriHttp = await import('@tauri-apps/plugin-http')
++  return tauriHttp.fetch(input as any, { ...init, proxy: DIRECT_PROXY } as any) as unknown as Response
++}
+diff --git a/src/views/settings/ModelSettings.vue b/src/views/settings/ModelSettings.vue
+index 4a9804a..19c6e2a 100644
+--- a/src/views/settings/ModelSettings.vue
++++ b/src/views/settings/ModelSettings.vue
+@@ -421,6 +421,7 @@ import { useModelConfig, fetchRemoteModelsCatalog, modelHasVision } from '../../
+ import type { AIPlatform, AIModel, ApiProtocol, RemoteModelIconMapping } from '../../services/model/config'
+ import { resolveExecutableModelJsCode, resolveRuntimeModelId } from '../../services/model/protocol'
+ import { environmentDetector } from '../../services/app/environmentDetector'
++import { DIRECT_PROXY } from '../../utils/directFetch'
+ import { getPlatformIconDisplayUrl, resolvePlatformIconUrl } from '../../services/app/iconCache'
+ import PlatformConfigDialog from './ModelSettings/PlatformConfigDialog.vue'
+ import PlatformContextMenu from './ModelSettings/PlatformContextMenu.vue'
+@@ -1712,7 +1713,8 @@ const testModel = async (model: AIModel, testFunctionCalling: boolean = false) =
+     
+     const tauriHttp = await import('@tauri-apps/plugin-http')
+     const tauriFetch = createCookieEnabledFetch(
+-      (input, init) => tauriHttp.fetch(input as any, init as any),
++      // 模型测试直连：与实际答题路径（invoke.ts）保持一致，绕过系统代理
++      (input, init) => tauriHttp.fetch(input as any, { ...(init as any), proxy: DIRECT_PROXY }),
+       testAbortController.value?.signal
+     )
+     const executableCode = resolveExecutableModelJsCode(model, selectedPlatform.value)
+diff --git a/src/views/settings/ModelSettings/ModelConfigDialog.vue b/src/views/settings/ModelSettings/ModelConfigDialog.vue
+index 98f381d..f42d4e9 100644
+--- a/src/views/settings/ModelSettings/ModelConfigDialog.vue
++++ b/src/views/settings/ModelSettings/ModelConfigDialog.vue
+@@ -262,6 +262,7 @@
+ 
+ <script setup lang="ts">
+ import { ref, computed, watch, onMounted, onUnmounted, nextTick } from 'vue'
++import { DIRECT_PROXY } from '../../../utils/directFetch'
+ import { EditorState } from '@codemirror/state'
+ import { EditorView, lineNumbers } from '@codemirror/view'
+ import { javascript } from '@codemirror/lang-javascript'
+@@ -687,7 +688,11 @@ let tauriFetchPromise: Promise<typeof import('@tauri-apps/plugin-http').fetch> |
+ 
+ const getTauriFetch = () => {
+   if (!tauriFetchPromise) {
+-    tauriFetchPromise = import('@tauri-apps/plugin-http').then(m => m.fetch)
++    tauriFetchPromise = import('@tauri-apps/plugin-http').then(m =>
++      // 模型列表直连：与答题路径（invoke.ts）保持一致，绕过系统代理（见 utils/directFetch.ts）
++      ((input: RequestInfo | URL, init?: RequestInit) =>
++        m.fetch(input as any, { ...(init || {}), proxy: DIRECT_PROXY } as any)) as typeof m.fetch
++    )
+   }
+   return tauriFetchPromise
+ }

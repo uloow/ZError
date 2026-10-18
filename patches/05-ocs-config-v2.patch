@@ -1,0 +1,36 @@
+diff --git a/src/views/home/OCSConfigDialog.vue b/src/views/home/OCSConfigDialog.vue
+index 54d385c..d126290 100644
+--- a/src/views/home/OCSConfigDialog.vue
++++ b/src/views/home/OCSConfigDialog.vue
+@@ -63,15 +63,28 @@ const ocsConfig = [{
+   "name": "ZE题库(自建版)",
+   "homepage": "http://app.zerror.cc",
+   "url": "http://localhost:3002/query",
+-  "method": "get",
++  // 必须是 post：OCS 的图片题优化兼容性检测（isAnswererWrapperSupportImageOptimize）
++  // 只认 POST，因为 base64 图片只能随请求体提交，GET 拼在 URL 上承载不了。
++  // 旧版这里是 get，导致 OCS 弹「当前题库配置暂不支持图片、公式等题目处理」。
++  "method": "post",
+   "type": "GM_xmlhttpRequest",
+   "contentType": "json",
+   "data": {
++    // title / options 保持原始文本（含图片 URL 原链），ZError 后端据此自行下载图片、
++    // 走 vision 通道。切勿改成 ${suggestion_title}：那是把 URL 换成 [图片N] 的纯文本，
++    // 换了之后 ZError 拿不到图，图片题会退化为纯文本盲猜。
+     "title": "${title}",
+     "options": "${options}",
+-    "type": "${type}"
++    "type": "${type}",
++    // 声明图片题能力：OCS 只检查 data 中是否有字段引用了 env.images /
++    // env.suggestion_title / env.suggestion_options（字符串占位符或 handler 源码均可）。
++    // 这里只回传图片张数、不上传 base64——ZError 按 URL 自己取图，传 base64 只会
++    // 让请求体和请求日志膨胀几十倍，没有收益。
++    "image_count": { "handler": "return (env) => (env.images || []).length" }
+   },
+-  "handler": "return (res)=>res.code === 0 ? [res.message, undefined] : [res.data.question,res.data.answer,{ai: res.data.is_ai}]"
++  "handler": "return (res)=>res.code === 0 ? [res.message, undefined] : [res.data.question,res.data.answer,{ai: res.data.is_ai}]",
++  // v2 起声明支持图片题优化字段（可选，便于排查配置版本）
++  "v": 2
+ }]
+ 
+ const formattedConfig = computed(() => {

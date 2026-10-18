@@ -1,0 +1,30 @@
+diff --git a/src-tauri/src/commands.rs b/src-tauri/src/commands.rs
+index 9e39fb9..0363911 100644
+--- a/src-tauri/src/commands.rs
++++ b/src-tauri/src/commands.rs
+@@ -213,6 +213,9 @@ pub async fn fetch_image_as_base64(app: tauri::AppHandle, url: String) -> Result
+ // 创建完整浏览器伪装请求
+ fn create_full_browser_request(url: &str) -> Result<reqwest::RequestBuilder, String> {
+     let client = reqwest::Client::builder()
++        // 抓题目图片必须直连：系统代理（Clash/Surge 等）会把 chaoxing CDN 的图片请求
++        // 拦成 567/403，或直接拒绝 localhost，导致图片题拿不到图、模型只能瞎猜。
++        .no_proxy()
+         .user_agent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+         .cookie_store(true)
+         .redirect(reqwest::redirect::Policy::limited(10))
+@@ -261,6 +264,7 @@ fn create_full_browser_request(url: &str) -> Result<reqwest::RequestBuilder, Str
+ // 创建简化请求
+ fn create_simple_request(url: &str) -> Result<reqwest::RequestBuilder, String> {
+     let client = reqwest::Client::builder()
++        .no_proxy()
+         .user_agent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
+         .build()
+         .map_err(|e| format!("创建HTTP客户端失败: {}", e))?;
+@@ -275,6 +279,7 @@ fn create_simple_request(url: &str) -> Result<reqwest::RequestBuilder, String> {
+ // 创建移动端伪装请求
+ fn create_mobile_request(url: &str) -> Result<reqwest::RequestBuilder, String> {
+     let client = reqwest::Client::builder()
++        .no_proxy()
+         .user_agent("Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1")
+         .build()
+         .map_err(|e| format!("创建HTTP客户端失败: {}", e))?;

@@ -1,0 +1,50 @@
+diff --git a/src/composables/useAppUpdate.ts b/src/composables/useAppUpdate.ts
+index f55b023..ca53c9f 100644
+--- a/src/composables/useAppUpdate.ts
++++ b/src/composables/useAppUpdate.ts
+@@ -394,27 +394,38 @@ async function checkForUpdates(options?: { forceDialog?: boolean }) {
+     const native = await tryNativeUpdaterCheck()
+     if (native !== null) {
+       if (native.error) {
+-        // 不再静默回退 DMG：把真实错误亮出来
++        // 原生 updater 失败：先试 legacy 通道拿版本信息。
++        // 自动检查时不再弹错误提示（以前每次启动都弹，用户关不掉），只在手动检查时提示。
+         currentVersion.value = VersionCheckService.getCurrentVersion()
+-        updateInfo.value = { version: '?', changelog: '', downloadUrl: '' }
++        updateInfo.value = null
+         try {
+           const legacy = await VersionCheckService.checkForUpdate()
+-          if (legacy.versionInfo) {
++          if (legacy.needsUpdate && legacy.versionInfo) {
+             updateInfo.value = legacy.versionInfo
+             setDownloadTarget(
+               resolvePlatformDownloadUrl(legacy.versionInfo),
+               legacy.versionInfo.version,
+             )
++            const dismissed = localStorage.getItem(DISMISS_KEY) === legacy.versionInfo.version
++            tipVisible.value = wantDialog || (!suppressAuto && !dismissed)
++            status.value = 'available'
++            return
+           }
+         } catch {
+           /* ignore */
+         }
++
++        console.warn('原生更新检查失败（已忽略）:', native.error)
++        if (!wantDialog) {
++          tipVisible.value = false
++          status.value = 'idle'
++          return
++        }
++
+         status.value = 'error'
+-        errorMessage.value = `原生更新检查失败：${native.error}`
++        errorMessage.value = `更新检查失败：${native.error}`
+         tipVisible.value = true
+-        if (wantDialog) {
+-          openUpdateDialog({ force: true, version: updateInfo.value?.version })
+-        }
++        openUpdateDialog({ force: true, version: '?' })
+         return
+       }
+       if (native.available && native.version) {
