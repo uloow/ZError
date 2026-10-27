@@ -73,50 +73,50 @@ index cccada1..6b0eb8a 100644
          } else {
            response = await fetch(url);
          }
-diff --git a/src/services/model/config.ts b/src/services/model/config.ts
-index 3681374..f495c6e 100644
---- a/src/services/model/config.ts
-+++ b/src/services/model/config.ts
-@@ -1,5 +1,6 @@
- import { reactive, watch, computed } from 'vue'
- import { normalizeApiProtocol } from './protocol'
+diff --git a/src/services/model/configRemote.ts b/src/services/model/configRemote.ts
+index 3a62c84..a65fa7e 100644
+--- a/src/services/model/configRemote.ts
++++ b/src/services/model/configRemote.ts
+@@ -1,6 +1,7 @@
+ /** 远程模型目录：拉取、归一化、和本地缓存合并去重。 */
+ import type { AIModel, AIPlatform, RemoteModelIconMapping, RemoteModelsCatalog } from './configTypes'
+ import { inferPlatformApiProtocol, modelHasVision } from './configTypes'
 +import { DIRECT_PROXY } from '../../utils/directFetch'
  
- // AI 平台配置接口
- export type ApiProtocol = 'openai-chat' | 'openai-response' | 'anthropic' | 'custom'
-@@ -374,7 +375,8 @@ let pendingRemoteModelsCatalogRequest: Promise<RemoteModelsCatalog> | null = nul
+ // 远程模型数据 URL（测试版 / 正式版统一）
+ export const PROD_REMOTE_MODELS_URL = 'https://webapi.zaizhexue.top/live/models.json'
+@@ -239,7 +240,7 @@ let pendingRemoteModelsCatalogRequest: Promise<RemoteModelsCatalog> | null = nul
  const fetchRemoteModelsCatalogFromUrl = async (url: string): Promise<RemoteModelsCatalog> => {
    try {
      const { fetch: tauriFetch } = await import('@tauri-apps/plugin-http')
 -    const r = await tauriFetch(url, { method: 'GET' })
-+    // 模型目录走国内 CDN，直连更稳（见 utils/directFetch.ts）
 +    const r = await tauriFetch(url, { method: 'GET', proxy: DIRECT_PROXY } as any)
      if (!r.ok) throw new Error(`HTTP ${r.status}`)
      return normalizeRemoteModelsCatalog(await r.json())
    } catch (tauriError) {
 diff --git a/src/services/model/runner.ts b/src/services/model/runner.ts
-index 0dc004a..aa46c67 100644
+index c54a9a5..503e723 100644
 --- a/src/services/model/runner.ts
 +++ b/src/services/model/runner.ts
-@@ -2,6 +2,7 @@ import { resolveExecutableModelJsCode, resolveRuntimeModelId } from './protocol'
- import { modelConfigManager, modelHasVision } from './config'
- import { settingsManager } from '../app/settings'
+@@ -4,6 +4,7 @@ import { settingsManager } from '../app/settings'
  import { logAgentDebug } from '../agent/debugLog'
+ import { takeToolImages, visionAttachParts } from './toolImages'
+ import { mergeToolArgs, mergeToolCalls } from './toolCallMerge'
 +import { DIRECT_PROXY } from '../../utils/directFetch'
  
  export interface ModelToolCall {
    id: string
-@@ -385,6 +386,8 @@ export async function runTextModel(
+@@ -372,6 +373,8 @@ export async function runTextModel(
+       try {
+         const response = await tauriHttp.fetch(request as any, {
+           ...init,
++          // 本地补丁：模型请求直连，绕开系统代理（详见 utils/directFetch.ts）
++          proxy: DIRECT_PROXY,
+           // 连接阶段单独加长；默认过短时 CDN 抖一下就会 “error sending request”
            connectTimeout: typeof (init as { connectTimeout?: number }).connectTimeout === 'number'
              ? (init as { connectTimeout?: number }).connectTimeout
-             : 30_000,
-+          // 模型 API 直连：绕过系统代理，防止流式请求被代理拖死（见 utils/directFetch.ts）
-+          proxy: DIRECT_PROXY,
-           credentials: init.credentials ?? 'include',
-           signal: init.signal ?? abortController.signal,
-         } as any)
 diff --git a/src/services/questionServer/invoke.ts b/src/services/questionServer/invoke.ts
-index 80a47a4..dddd69a 100644
+index b852714..7c62530 100644
 --- a/src/services/questionServer/invoke.ts
 +++ b/src/services/questionServer/invoke.ts
 @@ -1,6 +1,7 @@
@@ -127,7 +127,7 @@ index 80a47a4..dddd69a 100644
  import { modelApi, settingsApi } from './deps'
  import {
    createCancelledRequestError,
-@@ -197,11 +198,13 @@ export const callModelWithStreaming = async (
+@@ -204,11 +205,13 @@ export const callModelWithStreaming = async (
    const { invoke } = await import('@tauri-apps/api/core')
    const tauriFetch = async (input: RequestInfo | URL, init: RequestInit = {}) => {
      try {
@@ -147,7 +147,7 @@ index 80a47a4..dddd69a 100644
        if (isAbortLikeError(error)) throw error
        throw new Error(formatModelCallError(error, '网络请求失败'))
 diff --git a/src/services/questionServer/urlQuestion.ts b/src/services/questionServer/urlQuestion.ts
-index 5259444..31316f4 100644
+index 066c8cf..420466d 100644
 --- a/src/services/questionServer/urlQuestion.ts
 +++ b/src/services/questionServer/urlQuestion.ts
 @@ -1,5 +1,6 @@
@@ -155,9 +155,9 @@ index 5259444..31316f4 100644
  import { resolveExecutableModelJsCode, resolveRuntimeModelId } from '../model/protocol'
 +import { DIRECT_PROXY } from '../../utils/directFetch'
  import {
+   buildImageAnswerRule,
    buildUrlOptionMapForMode,
-   buildUrlQuestionPromptParts,
-@@ -458,6 +459,8 @@ export const analyzeUrlQuestion = async (requestId: string) => {
+@@ -493,6 +494,8 @@ export const analyzeUrlQuestion = async (requestId: string) => {
      const tauriFetch: typeof fetch = ((input: RequestInfo | URL, init: RequestInit = {}) =>
        tauriHttp.fetch(input as any, {
          ...init,
@@ -199,50 +199,49 @@ index 0000000..715aa53
 +  const tauriHttp = await import('@tauri-apps/plugin-http')
 +  return tauriHttp.fetch(input as any, { ...init, proxy: DIRECT_PROXY } as any) as unknown as Response
 +}
-diff --git a/src/views/settings/ModelSettings.vue b/src/views/settings/ModelSettings.vue
-index 4a9804a..19c6e2a 100644
---- a/src/views/settings/ModelSettings.vue
-+++ b/src/views/settings/ModelSettings.vue
-@@ -421,6 +421,7 @@ import { useModelConfig, fetchRemoteModelsCatalog, modelHasVision } from '../../
- import type { AIPlatform, AIModel, ApiProtocol, RemoteModelIconMapping } from '../../services/model/config'
- import { resolveExecutableModelJsCode, resolveRuntimeModelId } from '../../services/model/protocol'
- import { environmentDetector } from '../../services/app/environmentDetector'
-+import { DIRECT_PROXY } from '../../utils/directFetch'
- import { getPlatformIconDisplayUrl, resolvePlatformIconUrl } from '../../services/app/iconCache'
- import PlatformConfigDialog from './ModelSettings/PlatformConfigDialog.vue'
- import PlatformContextMenu from './ModelSettings/PlatformContextMenu.vue'
-@@ -1712,7 +1713,8 @@ const testModel = async (model: AIModel, testFunctionCalling: boolean = false) =
-     
-     const tauriHttp = await import('@tauri-apps/plugin-http')
-     const tauriFetch = createCookieEnabledFetch(
--      (input, init) => tauriHttp.fetch(input as any, init as any),
-+      // 模型测试直连：与实际答题路径（invoke.ts）保持一致，绕过系统代理
-+      (input, init) => tauriHttp.fetch(input as any, { ...(init as any), proxy: DIRECT_PROXY }),
-       testAbortController.value?.signal
-     )
-     const executableCode = resolveExecutableModelJsCode(model, selectedPlatform.value)
-diff --git a/src/views/settings/ModelSettings/ModelConfigDialog.vue b/src/views/settings/ModelSettings/ModelConfigDialog.vue
-index 98f381d..f42d4e9 100644
---- a/src/views/settings/ModelSettings/ModelConfigDialog.vue
-+++ b/src/views/settings/ModelSettings/ModelConfigDialog.vue
-@@ -262,6 +262,7 @@
- 
- <script setup lang="ts">
- import { ref, computed, watch, onMounted, onUnmounted, nextTick } from 'vue'
+diff --git a/src/views/settings/ModelSettings/testModel.ts b/src/views/settings/ModelSettings/testModel.ts
+index de479cd..e419b3f 100644
+--- a/src/views/settings/ModelSettings/testModel.ts
++++ b/src/views/settings/ModelSettings/testModel.ts
+@@ -3,6 +3,7 @@ import type { Ref } from 'vue'
+ import type { AIModel, AIPlatform } from '../../../services/model/config'
+ import { modelHasVision } from '../../../services/model/config'
+ import { resolveExecutableModelJsCode, resolveRuntimeModelId } from '../../../services/model/protocol'
 +import { DIRECT_PROXY } from '../../../utils/directFetch'
- import { EditorState } from '@codemirror/state'
- import { EditorView, lineNumbers } from '@codemirror/view'
- import { javascript } from '@codemirror/lang-javascript'
-@@ -687,7 +688,11 @@ let tauriFetchPromise: Promise<typeof import('@tauri-apps/plugin-http').fetch> |
  
- const getTauriFetch = () => {
-   if (!tauriFetchPromise) {
--    tauriFetchPromise = import('@tauri-apps/plugin-http').then(m => m.fetch)
-+    tauriFetchPromise = import('@tauri-apps/plugin-http').then(m =>
-+      // 模型列表直连：与答题路径（invoke.ts）保持一致，绕过系统代理（见 utils/directFetch.ts）
-+      ((input: RequestInfo | URL, init?: RequestInit) =>
-+        m.fetch(input as any, { ...(init || {}), proxy: DIRECT_PROXY } as any)) as typeof m.fetch
+ export type ModelTestState = {
+   selectedPlatform: Ref<AIPlatform | null>
+@@ -320,7 +321,7 @@ export const bindModelTest = (state: ModelTestState) => {
+     
+       const tauriHttp = await import('@tauri-apps/plugin-http')
+       const tauriFetch = createCookieEnabledFetch(
+-        (input, init) => tauriHttp.fetch(input as any, init as any),
++        (input, init) => tauriHttp.fetch(input as any, { ...(init as any), proxy: DIRECT_PROXY } as any),
+         testAbortController.value?.signal
+       )
+       const executableCode = resolveExecutableModelJsCode(model, selectedPlatform.value)
+diff --git a/src/views/settings/ModelSettings/useModelConfigDialog.ts b/src/views/settings/ModelSettings/useModelConfigDialog.ts
+index 94f5d5d..8331bfe 100644
+--- a/src/views/settings/ModelSettings/useModelConfigDialog.ts
++++ b/src/views/settings/ModelSettings/useModelConfigDialog.ts
+@@ -9,6 +9,7 @@ import * as acorn from 'acorn'
+ import { modelHasVision, type AIModel, type ThinkingEffort, type ThinkingOffResponsesEffort } from '../../../services/model/config'
+ import { buildPresetProcessModelJsCode, normalizeApiProtocol, readModelIdFromJsCode, resolveExecutableModelJsCode } from '../../../services/model/protocol'
+ import { useExclusiveMenu } from '../../../composables/useExclusiveMenu'
++import { DIRECT_PROXY } from '../../../utils/directFetch'
+ 
+ export interface Props {
+   show: boolean
+@@ -423,7 +424,11 @@ export function useModelConfigDialog(props: Props, emit: Emits) {
+     if (!tauriFetchPromise) {
+       tauriFetchPromise = import('@tauri-apps/plugin-http').then(m => m.fetch)
+     }
+-    return tauriFetchPromise
++    // 本地补丁：模型列表拉取 / 模型测试统一直连，避开系统代理（详见 utils/directFetch.ts）
++    return tauriFetchPromise.then(
++      f => ((input: RequestInfo | URL, init: RequestInit = {}) =>
++        f(input as any, { ...init, proxy: DIRECT_PROXY } as any) as unknown as Promise<Response>) as unknown as typeof fetch
 +    )
    }
-   return tauriFetchPromise
- }
+ 
+   const applyFetchedModels = async (models: FetchedModelItem[]) => {

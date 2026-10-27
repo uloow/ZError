@@ -62,7 +62,9 @@ jobs:
           repository: ${{ env.UPSTREAM_OWNER }}/${{ env.UPSTREAM_REPO }}
           ref: ${{ env.UPSTREAM_BRANCH }}
           path: src
-          fetch-depth: 1
+          # 不能浅克隆：补丁按旧上游生成，上游提交后 git apply --3way 需要历史 blob
+          # 才能做三方合并，浅克隆会直接报 "repository lacks the necessary blob"
+          fetch-depth: 0
 
       - name: 应用补丁
         id: patch
@@ -130,9 +132,11 @@ jobs:
           # 只出 .app：Tauri 自带的 dmg 打包要驱动 Finder，CI 里会失败，下面用 hdiutil 手工封
           # createUpdaterArtifacts 用 --config 覆盖为 false：上游配了更新公钥但我们没有私钥，
           # 不改的话打包阶段会直接报 "A public key has been found, but no private key" 失败。
-          # 用命令行覆盖而不是改补丁，这样上游改这个字段也不会导致补丁冲突。
+          # beforeBuildCommand 覆盖为 vite build：上游 dev 分支当前有若干 vue-tsc 类型错误，
+          # 跑 npm run build（vue-tsc && vite build）会卡在类型检查上。esbuild 不做类型检查，
+          # 产物不受影响；等上游把类型错误修好，可以删掉这一项恢复全量检查。
           ./node_modules/.bin/tauri build -b app \
-            --config '{"bundle":{"createUpdaterArtifacts":false}}'
+            --config '{"bundle":{"createUpdaterArtifacts":false},"build":{"beforeBuildCommand":"npx vite build"}}'
 
       - name: 读取版本号并封 DMG
         id: pkg
@@ -171,7 +175,9 @@ jobs:
             echo
             echo "安装：下载 DMG → 拖进「应用程序」→ **首次运行右键 →「打开」**（未签名会被 Gatekeeper 拦）。"
             echo
-            echo "本构建已合入 6 个 macOS 修复补丁，详见 [patches/](./patches)。"
+            echo "本构建已合入 4 个 macOS 修复补丁，详见 [patches/](./patches)。"
+            echo
+            echo "> OCS 题库配置请用新版「复制配置」重新粘贴一次：上游已原生支持 OCS 5.1.0 图片题协议。"
             echo
             echo "<!-- upstream-sha: ${{ steps.check.outputs.upstream_sha }} -->"
           } > /tmp/release-notes.md

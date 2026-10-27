@@ -23,23 +23,26 @@ patches/*.patch                     # 6 个 macOS 修复补丁
 
 1. 查上游 `dev-improvements` 分支最新 commit
 2. 和上次构建的 commit 比对，**没变就直接跳过**，不浪费构建资源
-3. 有更新 → 检出上游源码 → 按顺序打 `patches/*.patch`
+3. 有更新 → 检出上游源码（**完整历史**，`git apply --3way` 需要旧 blob）→ 按顺序打 `patches/*.patch`
 4. `npm ci` → `tauri build` → `hdiutil` 封 DMG
+   （`tauri build` 用 `--config` 覆盖 `beforeBuildCommand` 为 `npx vite build`，跳过上游 dev 分支当前的 `vue-tsc` 类型错误）
 5. 版本号直接取 `src-tauri/tauri.conf.json` 里的值（**跟随上游，不自造版本号**）
 6. 发 Release，tag 为 `v{版本号}-macos`；上游同一版本有多次提交时**滚动覆盖同一个 release**，不会堆一堆重复 tag
 
 **补丁打不上时不会出坏包**：流水线会失败并自动开一个 issue 提醒，需要人工把补丁 rebase 到新上游代码上。
 
-## 🔧 内置的 6 个补丁
+## 🔧 内置的 4 个补丁
 
 | 文件 | 解决的问题 |
 | --- | --- |
 | `01-image-fetch-no-proxy` | 图片题正确率极低——系统代理把超星图片 CDN 拦成 403/567，图片根本没下载成功 |
 | `02-updater-no-proxy` | 每次启动弹「更新失败」——`webapi.zaizhexue.top` 走代理返回 HTTP 567，更新器解析不到 release JSON |
 | `03-update-error-no-popup` | 自动更新检查失败不再弹窗打断答题，只在手动检查时提示 |
-| `04-missing-exports` | 上游 HEAD 有断裂引用，`vue-tsc` 编译不过，补两个缺失导出 |
-| `05-ocs-config-v2` | OCS 提示「题库配置暂不支持图片、公式」——「复制配置」模板升级为 POST + 图片字段声明 |
-| `06-direct-fetch` | 模型请求偶发 `Timeout waiting for model response`——9 处请求改直连，绕开系统代理 |
+| `04-direct-fetch` | 模型请求偶发 `Timeout waiting for model response`——10 处请求改直连，绕开系统代理 |
+
+> 早先的 `04-missing-exports`、`05-ocs-config-v2` 已在 2026-10 上游合并后失效并移除：上游补齐了缺失导出，且已原生支持 OCS 5.1.0 图片题协议（`method: post` + `images` handler）。
+>
+> **升级到这批构建后，请到设置里重新「复制配置」并粘回 OCS**，否则用的还是旧模板。
 
 补丁是标准的 `git apply` 格式，可以单独摘出来用：
 
